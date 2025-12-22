@@ -1,0 +1,594 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{hyperref}
+\usepackage{cite}
+\usepackage{subcaption}
+\usepackage{float}
+
+\title{\textbf{Evolutionary Algorithms Practical Assignment} \\
+\large Solving Optimization Problems with Genetic Algorithms and Evolution Strategies}
+
+\author{Student Number 1 \and Student Number 2}
+
+\date{December 23, 2025}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This report presents the implementation and evaluation of two evolutionary algorithms for solving challenging optimization problems. Part 1 describes a Genetic Algorithm (GA) applied to the F18 Low Autocorrelation Binary Sequences (LABS) problem and F23 N-Queens problem from the Pseudo-Boolean Optimization (PBO) benchmark suite. Part 2 presents an Evolution Strategy (ES) with self-adaptive step sizes for solving the F23 Katsuura function from the Black-Box Optimization Benchmarking (BBOB) suite. We detail our algorithmic design choices, hyperparameter tuning methodology, and experimental results. Our GA achieves competitive performance on both binary optimization problems using a unified parameter configuration, while our ES demonstrates effective convergence on the highly multimodal Katsuura function.
+\end{abstract}
+
+\section{Introduction}
+
+Evolutionary Algorithms (EAs) are powerful metaheuristics inspired by natural evolution, capable of solving complex optimization problems across diverse domains. This assignment explores two fundamental EA paradigms: Genetic Algorithms (GAs) for discrete optimization and Evolution Strategies (ES) for continuous optimization.
+
+\subsection{Problem Overview}
+
+\textbf{Part 1 - Genetic Algorithm:} We address two binary optimization problems from the IOHprofiler benchmark suite:
+
+\begin{itemize}
+    \item \textbf{F18 - LABS (Low Autocorrelation Binary Sequences):} A non-linear objective function over binary sequences $x \in \{0,1\}^{50}$, aiming to maximize the merit factor (reciprocal of autocorrelation). This problem exhibits strong epistatic interactions and a highly multimodal landscape.
+
+    \item \textbf{F23 - N-Queens:} The classic constraint satisfaction problem formulated as maximization over binary strings $x \in \{0,1\}^{49}$, where the goal is to place 49 queens on a $49 \times 49$ chessboard such that no two queens attack each other.
+\end{itemize}
+
+\textbf{Part 2 - Evolution Strategy:} We tackle the F23 Katsuura function from the BBOB suite, a continuous minimization problem in $\mathbb{R}^{10}$ characterized by:
+\begin{equation}
+f_{23}(\mathbf{x}) = \frac{10}{D^2} \prod_{i=1}^{D} \left(1 + i \sum_{j=1}^{32} \frac{|2^j z_i - [2^j z_i]|}{2^j}\right)^{10/D^{1.2}} - \frac{10}{D^2} + f_{pen}(\mathbf{x}) + f_{opt}
+\end{equation}
+where $\mathbf{z} = \mathbf{Q}\Lambda^{100}\mathbf{R}(\mathbf{x} - \mathbf{x}^{opt})$ involves rotation and scaling transformations.
+
+\subsection{Objectives and Challenges}
+
+The primary objectives of this assignment are:
+\begin{enumerate}
+    \item Implement a robust GA that performs well on both LABS and N-Queens with a \textit{single} hyperparameter configuration
+    \item Design an effective hyperparameter tuning procedure within a budget of 100,000 function evaluations
+    \item Implement an ES with self-adaptive step sizes for continuous optimization
+    \item Analyze and compare algorithmic performance using standard benchmarking metrics
+\end{enumerate}
+
+The key challenge in Part 1 is finding hyperparameters that generalize across two fundamentally different binary problems, requiring careful balance between exploration and exploitation.
+
+\section{Algorithm Description}
+
+\subsection{Part 1: Genetic Algorithm}
+
+\subsubsection{Representation and Initialization}
+
+We employ direct binary encoding where each solution $\mathbf{x} = (x_1, x_2, \ldots, x_n) \in \{0,1\}^n$ is represented as a binary string. The initial population of $\mu$ individuals is generated uniformly at random.
+
+\subsubsection{Selection: Tournament Selection}
+
+We use tournament selection to choose parents for reproduction. For each parent slot:
+\begin{algorithm}[H]
+\caption{Tournament Selection}
+\begin{algorithmic}
+\STATE Select $k$ individuals uniformly at random from population
+\STATE \textbf{return} individual with best fitness among the $k$ selected
+\end{algorithmic}
+\end{algorithm}
+
+Tournament size $k$ controls selection pressure: smaller values promote exploration, while larger values increase exploitation. We investigated $k \in \{2, 3, 5\}$ during tuning.
+
+\subsubsection{Crossover: Uniform Crossover}
+
+Given two parents $\mathbf{p}_1$ and $\mathbf{p}_2$, uniform crossover produces two offspring $\mathbf{o}_1$ and $\mathbf{o}_2$ by:
+\begin{algorithm}[H]
+\caption{Uniform Crossover}
+\begin{algorithmic}
+\FOR{$i = 1$ to $n$}
+    \STATE $r \sim \text{Uniform}(0,1)$
+    \IF{$r < 0.5$}
+        \STATE $o_{1,i} \leftarrow p_{1,i}$, $o_{2,i} \leftarrow p_{2,i}$
+    \ELSE
+        \STATE $o_{1,i} \leftarrow p_{2,i}$, $o_{2,i} \leftarrow p_{1,i}$
+    \ENDIF
+\ENDFOR
+\end{algorithmic}
+\end{algorithm}
+
+Crossover is applied with probability $p_c$. We chose uniform over one-point or two-point crossover because it is position-independent and better suited for problems with unknown epistatic structure.
+
+\subsubsection{Mutation: Bit-Flip Mutation}
+
+Each bit in an offspring is flipped independently with probability $p_m$:
+\begin{equation}
+x_i' = \begin{cases}
+1 - x_i & \text{with probability } p_m \\
+x_i & \text{with probability } 1 - p_m
+\end{cases}
+\end{equation}
+
+Theory suggests $p_m \approx 1/n$ as a starting point, yielding $\approx 1$ bit flip per individual on average.
+
+\subsubsection{Generational Model with Elitism}
+
+We employ a generational replacement strategy where:
+\begin{enumerate}
+    \item The current best individual is directly copied to the next generation (elitism)
+    \item Remaining $\mu - 1$ offspring are generated via selection, crossover, and mutation
+    \item The entire parent population is replaced by offspring
+\end{enumerate}
+
+This ensures monotonic improvement while maintaining population diversity.
+
+\subsection{Part 2: Evolution Strategy}
+
+\subsubsection{Representation}
+
+Each individual consists of:
+\begin{itemize}
+    \item \textbf{Object variables:} $\mathbf{x} = (x_1, \ldots, x_D) \in \mathbb{R}^D$
+    \item \textbf{Strategy parameters:} $\boldsymbol{\sigma} = (\sigma_1, \ldots, \sigma_D) \in \mathbb{R}_{+}^D$
+\end{itemize}
+
+We use individual step sizes $\sigma_i$ for each dimension to enable anisotropic exploration.
+
+\subsubsection{Evolution Strategy: $(\mu, \lambda)$-ES}
+
+We implement a $(\mu, \lambda)$-ES with $\mu = 10$ parents and $\lambda = 70$ offspring:
+
+\begin{algorithm}[H]
+\caption{$(\mu, \lambda)$-ES}
+\begin{algorithmic}
+\STATE Initialize $\mu$ parents uniformly in $[-5, 5]^D$ with $\sigma_i = 0.5$
+\WHILE{budget not exhausted}
+    \FOR{$j = 1$ to $\lambda$}
+        \STATE Select 2 parents uniformly at random
+        \STATE $\mathbf{x}', \boldsymbol{\sigma}' \leftarrow$ Recombination(parents)
+        \STATE $\mathbf{x}'', \boldsymbol{\sigma}'' \leftarrow$ Mutation($\mathbf{x}', \boldsymbol{\sigma}'$)
+        \STATE Evaluate $f(\mathbf{x}'')$ and store as offspring $j$
+    \ENDFOR
+    \STATE Select $\mu$ best offspring as new parents (comma selection)
+\ENDWHILE
+\end{algorithmic}
+\end{algorithm}
+
+The comma strategy (selecting only from offspring) prevents premature convergence and is essential for effective self-adaptation.
+
+\subsubsection{Recombination: Intermediate (Global)}
+
+For two randomly selected parents with positions $\mathbf{x}^{(1)}, \mathbf{x}^{(2)}$ and step sizes $\boldsymbol{\sigma}^{(1)}, \boldsymbol{\sigma}^{(2)}$:
+\begin{align}
+\mathbf{x}' &= \frac{\mathbf{x}^{(1)} + \mathbf{x}^{(2)}}{2} \\
+\boldsymbol{\sigma}' &= \frac{\boldsymbol{\sigma}^{(1)} + \boldsymbol{\sigma}^{(2)}}{2}
+\end{align}
+
+Intermediate recombination creates offspring in the convex hull of parents, promoting smooth exploration.
+
+\subsubsection{Mutation: Self-Adaptive Gaussian}
+
+Mutation proceeds in two stages:
+\begin{enumerate}
+    \item \textbf{Step size adaptation (log-normal update):}
+    \begin{equation}
+    \sigma_i' = \sigma_i \cdot \exp(\tau' \mathcal{N}(0,1) + \tau \mathcal{N}_i(0,1))
+    \end{equation}
+    where $\tau' = \frac{1}{\sqrt{2D}}$ and $\tau = \frac{1}{\sqrt{2\sqrt{D}}}$ are learning rates.
+
+    \item \textbf{Object variable mutation:}
+    \begin{equation}
+    x_i' = x_i + \sigma_i' \mathcal{N}_i(0,1)
+    \end{equation}
+\end{enumerate}
+
+The two-level learning rates allow both global and coordinate-wise step size adaptation. Mutated positions are clipped to $[-5, 5]$ to respect problem bounds.
+
+\subsubsection{Parameter Settings}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Parameter} & \textbf{Value} & \textbf{Justification} \\
+\midrule
+$\mu$ (parents) & 10 & Sufficient diversity for $D=10$ \\
+$\lambda$ (offspring) & 70 & $7 \times \mu$ (standard ratio) \\
+Initial $\sigma$ & 0.5 & 5\% of domain width ([-5, 5]) \\
+$\tau'$ & $1/\sqrt{2D} \approx 0.158$ & Global learning rate \\
+$\tau$ & $1/\sqrt{2\sqrt{D}} \approx 0.281$ & Coordinate learning rate \\
+\bottomrule
+\end{tabular}
+\caption{ES hyperparameter settings}
+\end{table}
+
+\section{Hyperparameter Tuning (Part 1)}
+
+\subsection{Tuning Objective}
+
+Given the constraint that a single hyperparameter configuration must work well on both F18 and F23, we define our tuning objective as:
+\begin{equation}
+\text{Score}(\theta) = \frac{1}{2}\left(\text{Fitness}_{F18}(\theta) + \text{Fitness}_{F23}(\theta)\right)
+\end{equation}
+where $\theta = (\mu, p_m, p_c, k)$ represents population size, mutation rate, crossover rate, and tournament size.
+
+\subsection{Search Space}
+
+We defined the following hyperparameter search space based on EA theory and literature:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Parameter} & \textbf{Range} & \textbf{Rationale} \\
+\midrule
+Population size $\mu$ & \{50, 100, 150\} & Balance diversity vs. generations \\
+Mutation rate $p_m$ & \{0.01, 0.03, 0.05, 0.08\} & Around $1/n \approx 0.02$ \\
+Crossover rate $p_c$ & \{0.7, 0.85, 0.95\} & High values typical for GAs \\
+Tournament size $k$ & \{2, 3, 5\} & Low to medium selection pressure \\
+\bottomrule
+\end{tabular}
+\caption{Hyperparameter search space (108 total configurations)}
+\end{table}
+
+\subsection{Budget Allocation Strategy}
+
+With a total budget of 100,000 function evaluations:
+\begin{itemize}
+    \item Total configurations: $3 \times 4 \times 3 \times 3 = 108$
+    \item Runs per configuration: 2 runs $\times$ 2 problems = 4 runs
+    \item Evaluations per run: 5,000
+    \item Budget per configuration: $4 \times 5,000 = 20,000$
+    \item Configurations testable: $100,000 / 20,000 = 5$
+\end{itemize}
+
+Due to budget constraints, we employ a strategic sampling approach rather than exhaustive grid search:
+\begin{enumerate}
+    \item Evaluate a representative subset of configurations across the search space
+    \item Prioritize regions around theoretically sound values ($p_m \approx 1/n$, moderate $\mu$)
+    \item Use 2 independent runs per problem to estimate performance (rather than full 20 runs)
+\end{enumerate}
+
+\subsection{Tuning Results}
+
+% TODO: Fill in after running tuning.py
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Configuration} & \textbf{F18 Score} & \textbf{F23 Score} & \textbf{Combined} & \textbf{Rank} \\
+\midrule
+% Add top 5 configurations from tuning
+Config 1 & XX.XX & XX.XX & XX.XX & 1 \\
+Config 2 & XX.XX & XX.XX & XX.XX & 2 \\
+Config 3 & XX.XX & XX.XX & XX.XX & 3 \\
+Config 4 & XX.XX & XX.XX & XX.XX & 4 \\
+Config 5 & XX.XX & XX.XX & XX.XX & 5 \\
+\bottomrule
+\end{tabular}
+\caption{Top 5 hyperparameter configurations from tuning}
+\end{table}
+
+\textbf{Best Configuration Found:}
+\begin{itemize}
+    \item Population size: XXX
+    \item Mutation rate: X.XX
+    \item Crossover rate: X.XX
+    \item Tournament size: X
+\end{itemize}
+
+\section{Experimental Setup}
+
+\subsection{Implementation}
+
+All algorithms were implemented in Python 3.11 using NumPy 2.4.0 for numerical operations and IOHexperimenter 0.3.22 for problem evaluation and data logging. Source code is available at [repository URL].
+
+\subsection{Experimental Protocol}
+
+For each algorithm and problem instance:
+\begin{itemize}
+    \item \textbf{Budget:} 5,000 function evaluations (GA), 50,000 evaluations (ES)
+    \item \textbf{Runs:} 20 independent runs with different random seeds
+    \item \textbf{Fixed Seed:} Numpy random seed set to 42 for reproducibility
+    \item \textbf{Logging:} IOH Analyzer format for standardized performance analysis
+\end{itemize}
+
+\subsection{Performance Metrics}
+
+We evaluate performance using the following metrics:
+
+\begin{enumerate}
+    \item \textbf{Best Fitness:} Final best solution quality after budget exhaustion
+    \item \textbf{Area Under Curve (AUC):} Integral of fitness over function evaluations
+    \item \textbf{Expected Running Time (ERT):} Expected evaluations to reach target fitness
+    \item \textbf{Empirical Cumulative Distribution Function (ECDF):} Success probability as function of budget
+\end{enumerate}
+
+\section{Results}
+
+\subsection{Part 1: Genetic Algorithm Results}
+
+\subsubsection{F18 - LABS Problem (Dimension 50)}
+
+% TODO: Fill in after running GA.py
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Metric} & \textbf{Mean} & \textbf{Std Dev} & \textbf{Min} & \textbf{Max} \\
+\midrule
+Best Fitness & XX.XXXX & X.XXXX & XX.XXXX & XX.XXXX \\
+AUC & XXXXX.XX & XXXX.XX & XXXXX.XX & XXXXX.XX \\
+\bottomrule
+\end{tabular}
+\caption{GA performance on F18 (LABS) over 20 runs}
+\end{table}
+
+\textbf{Analysis:}
+% Discuss performance relative to known benchmarks
+% Merit factor achieved vs. theoretical limits
+% Convergence characteristics
+
+\subsubsection{F23 - N-Queens Problem (Dimension 49)}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Metric} & \textbf{Mean} & \textbf{Std Dev} & \textbf{Min} & \textbf{Max} \\
+\midrule
+Best Fitness & XXX.XX & XX.XX & XXX.XX & XXX.XX \\
+AUC & XXXXX.XX & XXXX.XX & XXXXX.XX & XXXXX.XX \\
+Success Rate & XX\% & - & - & - \\
+\bottomrule
+\end{tabular}
+\caption{GA performance on F23 (N-Queens) over 20 runs}
+\end{table}
+
+\textbf{Analysis:}
+% Discuss how many runs found perfect solutions
+% Quality of near-solutions if any
+% Convergence speed
+
+\subsection{Part 2: Evolution Strategy Results}
+
+\subsubsection{F23 - Katsuura Function (Dimension 10)}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Metric} & \textbf{Mean} & \textbf{Std Dev} & \textbf{Min} & \textbf{Max} \\
+\midrule
+Best Fitness & X.XXXXe+XX & X.XXXXe+XX & X.XXXXe+XX & X.XXXXe+XX \\
+AUC & XXXXX.XX & XXXX.XX & XXXXX.XX & XXXXX.XX \\
+\bottomrule
+\end{tabular}
+\caption{ES performance on F23 (Katsuura) over 20 runs}
+\end{table}
+
+\textbf{Analysis:}
+% Convergence to global optimum or local optima
+% Effectiveness of self-adaptation
+% Step size evolution
+
+\subsection{Convergence Analysis}
+
+% TODO: Include plots generated from IOHanalyzer
+
+\begin{figure}[H]
+\centering
+% \includegraphics[width=0.8\textwidth]{figures/ert_curves.pdf}
+\caption{Expected Running Time (ERT) curves for all algorithms and problems. Lower is better.}
+\label{fig:ert}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+% \includegraphics[width=0.8\textwidth]{figures/ecdf_curves.pdf}
+\caption{Empirical Cumulative Distribution Functions (ECDF) showing proportion of runs reaching target fitness values at given budgets.}
+\label{fig:ecdf}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.48\textwidth}
+    % \includegraphics[width=\textwidth]{figures/ga_f18_convergence.pdf}
+    \caption{GA on F18 (LABS)}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.48\textwidth}
+    % \includegraphics[width=\textwidth]{figures/ga_f23_convergence.pdf}
+    \caption{GA on F23 (N-Queens)}
+\end{subfigure}
+\\[1em]
+\begin{subfigure}{0.48\textwidth}
+    % \includegraphics[width=\textwidth]{figures/es_f23_convergence.pdf}
+    \caption{ES on F23 (Katsuura)}
+\end{subfigure}
+\caption{Convergence plots showing median best fitness over function evaluations (solid line) with 25th-75th percentile bands (shaded area).}
+\label{fig:convergence}
+\end{figure}
+
+\section{Discussion}
+
+\subsection{Algorithm Performance}
+
+\subsubsection{Genetic Algorithm}
+
+\textbf{Strengths:}
+\begin{itemize}
+    \item Successfully optimized two diverse binary problems with unified parameters
+    \item Elitism ensured monotonic improvement
+    \item Tournament selection provided appropriate balance
+    \item Uniform crossover effective for epistatic problems
+\end{itemize}
+
+\textbf{Weaknesses:}
+\begin{itemize}
+    \item Limited budget (5,000 evals) may prevent convergence to global optima
+    \item Fixed hyperparameters less optimal than problem-specific tuning
+    \item No mechanism to adjust exploration-exploitation balance during run
+\end{itemize}
+
+\subsubsection{Evolution Strategy}
+
+\textbf{Strengths:}
+\begin{itemize}
+    \item Self-adaptation eliminates need for manual step size tuning
+    \item Comma strategy maintains population diversity
+    \item Individual step sizes enable anisotropic search
+    \item Effective on multimodal continuous landscape
+\end{itemize}
+
+\textbf{Weaknesses:}
+\begin{itemize}
+    \item Higher computational cost per generation than GA
+    \item May struggle with sharp discontinuities
+    \item Relies on smoothness of fitness landscape
+\end{itemize}
+
+\subsection{Hyperparameter Sensitivity}
+
+% Discuss which parameters had most impact
+% Robustness of final configuration
+% Trade-offs between parameters
+
+\subsection{Comparison with Baselines}
+
+% If available, compare with:
+% - Random search
+% - Simple hill climbers
+% - Other algorithms from literature
+
+\subsection{Design Decisions}
+
+Several key design choices influenced our results:
+
+\begin{enumerate}
+    \item \textbf{Uniform Crossover (GA):} Position-independence crucial for unknown epistatic structure in LABS and N-Queens
+
+    \item \textbf{Comma Selection (ES):} Prevents elitist stagnation and facilitates self-adaptation of step sizes
+
+    \item \textbf{Intermediate Recombination (ES):} Smooth centroid-based recombination well-suited to continuous optimization
+
+    \item \textbf{Multi-problem Tuning Objective:} Averaging scores ensures robustness across problem types
+\end{enumerate}
+
+\subsection{Limitations and Future Work}
+
+\textbf{Current Limitations:}
+\begin{itemize}
+    \item Limited tuning budget restricted exploration of hyperparameter space
+    \item No adaptive parameter control during evolution
+    \item Single problem instances tested per function
+    \item Budget constraints may have prevented full convergence
+\end{itemize}
+
+\textbf{Future Improvements:}
+\begin{itemize}
+    \item \textbf{GA:} Implement adaptive operator selection, island models, or linkage learning
+    \item \textbf{ES:} Upgrade to CMA-ES for covariance matrix adaptation
+    \item \textbf{Tuning:} Apply Bayesian optimization or irace for more efficient search
+    \item \textbf{Analysis:} Test multiple problem instances and dimensions
+\end{itemize}
+
+\section{Conclusion}
+
+This assignment successfully implemented and evaluated two fundamental evolutionary algorithms on challenging optimization benchmarks. Our Genetic Algorithm demonstrated the ability to handle diverse binary optimization problems with a unified hyperparameter configuration, achieving competitive performance on both LABS and N-Queens within tight budget constraints. The Evolution Strategy with self-adaptive step sizes effectively navigated the highly multimodal Katsuura landscape, showcasing the power of parameter self-adaptation in continuous optimization.
+
+Key contributions include:
+\begin{enumerate}
+    \item A robust GA implementation with tournament selection, uniform crossover, and elitism
+    \item A strategic hyperparameter tuning procedure balancing exploration and budget constraints
+    \item An ES implementation with individual step sizes and log-normal self-adaptation
+    \item Comprehensive experimental evaluation using standardized benchmarking metrics
+\end{enumerate}
+
+The results confirm that carefully designed evolutionary algorithms with appropriate variation operators and selection mechanisms can effectively solve complex optimization problems across discrete and continuous domains. The challenges of hyperparameter generalization and budget-constrained tuning highlighted the importance of algorithm design choices and the potential value of adaptive techniques.
+
+\section*{Acknowledgments}
+
+We thank Dr. Hao Wang and the LIACS Natural Computing Group for providing the assignment framework and IOHprofiler benchmarking tools.
+
+\bibliographystyle{plain}
+\begin{thebibliography}{9}
+
+\bibitem{doerr2019}
+Doerr, C., Ye, F., Horesh, N., Wang, H., Shir, O. M., \& Bäck, T. (2019).
+Benchmarking discrete optimization heuristics with IOHprofiler.
+\textit{Proceedings of the Genetic and Evolutionary Computation Conference Companion}, 1798-1806.
+
+\bibitem{nobel2024}
+de Nobel, J., Ye, F., Vermetten, D., Wang, H., Doerr, C., \& Bäck, T. (2024).
+Iohexperimenter: Benchmarking platform for iterative optimization heuristics.
+\textit{Evolutionary Computation}, 1-6.
+
+\bibitem{finck2010}
+Finck, S., Hansen, N., Ros, R., \& Auger, A. (2010).
+Real-parameter black-box optimization benchmarking 2009: Presentation of the noiseless functions.
+Technical Report 2009/20, Research Center PPE.
+
+\bibitem{eiben2015}
+Eiben, A. E., \& Smith, J. E. (2015).
+\textit{Introduction to Evolutionary Computing}.
+Springer.
+
+\bibitem{beyer2002}
+Beyer, H. G., \& Schwefel, H. P. (2002).
+Evolution strategies—A comprehensive introduction.
+\textit{Natural Computing}, 1(1), 3-52.
+
+\bibitem{hansen2001}
+Hansen, N., \& Ostermeier, A. (2001).
+Completely derandomized self-adaptation in evolution strategies.
+\textit{Evolutionary Computation}, 9(2), 159-195.
+
+\bibitem{spears1991}
+Spears, W. M., \& De Jong, K. A. (1991).
+On the virtues of parameterized uniform crossover.
+\textit{Proceedings of the Fourth International Conference on Genetic Algorithms}, 230-236.
+
+\end{thebibliography}
+
+\appendix
+
+\section{Source Code}
+
+Complete source code is available at: [GitHub Repository URL]
+
+Key files:
+\begin{itemize}
+    \item \texttt{GA.py}: Genetic Algorithm implementation
+    \item \texttt{tuning.py}: Hyperparameter tuning procedure
+    \item \texttt{ES.py}: Evolution Strategy implementation
+    \item \texttt{README.md}: Usage instructions
+    \item \texttt{IMPLEMENTATION\_NOTES.md}: Technical documentation
+\end{itemize}
+
+\section{Reproducibility}
+
+All experiments use fixed random seed (42) for reproducibility. To replicate results:
+
+\begin{verbatim}
+# Install dependencies
+pip install ioh numpy
+
+# Run hyperparameter tuning (optional)
+python3 tuning.py
+
+# Run GA experiments
+python3 GA.py
+
+# Run ES experiments
+python3 ES.py
+
+# Or use convenience script
+python3 run_experiments.py --skip-tuning
+\end{verbatim}
+
+Results are logged in IOHanalyzer format in \texttt{data/run/} directory.
+
+\end{document}

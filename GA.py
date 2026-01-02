@@ -11,7 +11,7 @@ budget = 5000
 # Set random seed for reproducibility
 np.random.seed(42)
 
-# Global variables for hyperparameters (will be set by tuning)
+# Global variables for hyperparameters (from tuning.py)
 POPULATION_SIZE = 100
 MUTATION_RATE = 0.01
 CROSSOVER_RATE = 0.85

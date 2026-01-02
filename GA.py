@@ -11,11 +11,11 @@ budget = 5000
 # Set random seed for reproducibility
 np.random.seed(42)
 
-# Global variables for hyperparameters (will be set by tuning)
+# Global variables for hyperparameters (from tuning.py)
 POPULATION_SIZE = 100
-MUTATION_RATE = 0.05
-CROSSOVER_RATE = 0.9
-TOURNAMENT_SIZE = 3
+MUTATION_RATE = 0.01
+CROSSOVER_RATE = 0.85
+TOURNAMENT_SIZE = 5
 
 
 def tournament_selection(population: np.ndarray, fitness: np.ndarray, tournament_size: int = 3) -> np.ndarray:

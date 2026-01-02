@@ -1,0 +1,18 @@
+IOH DATA ANALYSIS SUMMARY
+======================================================================
+
+Part 1: Genetic Algorithm
+
+F18 LABS (D=50, Budget=5000):
+  Mean ± Std: 4.0273 ± 0.4535
+  AUC: 3.66 ± 0.37
+
+F23 N-Queens (D=49, Budget=5000):
+  Mean ± Std: 6.1000 ± 0.5385
+  AUC: -7.21 ± 2.01
+
+Part 2: Evolution Strategy
+
+F23 Katsuura (D=10, Budget=50000):
+  Mean ± Std: 1.6891 ± 0.4243
+  AUC: 1.73 ± 0.40
